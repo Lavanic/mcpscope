@@ -2,6 +2,7 @@
 //! MCP server without changing it.
 
 mod db;
+mod install;
 mod jsonrpc;
 mod proxy;
 mod record;
@@ -57,6 +58,22 @@ enum Cmd {
         #[arg(long)]
         since: Option<String>,
     },
+    /// Wrap the servers in a client's config so their traffic is recorded
+    Install {
+        /// Only edit this client's config (claude, cursor)
+        #[arg(long)]
+        client: Option<String>,
+        /// Only wrap these servers (default: all)
+        names: Vec<String>,
+    },
+    /// Undo install: restore wrapped servers to their original commands
+    Uninstall {
+        /// Only edit this client's config (claude, cursor)
+        #[arg(long)]
+        client: Option<String>,
+        /// Only restore these servers (default: all)
+        names: Vec<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -64,6 +81,8 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Cmd::Tail { server, errors }) => tail::run(server.as_deref(), errors),
         Some(Cmd::Stats { server, since }) => stats::run(server.as_deref(), since.as_deref()),
+        Some(Cmd::Install { client, names }) => install::install(client.as_deref(), &names),
+        Some(Cmd::Uninstall { client, names }) => install::uninstall(client.as_deref(), &names),
         None => {
             if cli.server_cmd.is_empty() {
                 bail!("nothing to do: wrap a server with -- or use a subcommand (see --help)");
