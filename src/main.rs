@@ -1,7 +1,9 @@
 //! mcpscope: records the JSON-RPC conversation between an agent and an
 //! MCP server without changing it.
 
-use anyhow::{Result, bail};
+mod proxy;
+
+use anyhow::Result;
 use clap::Parser;
 
 /// Transparent recording proxy for MCP servers.
@@ -25,8 +27,8 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let server = cli.name.unwrap_or_else(|| basename(&cli.command[0]));
-    // relay comes next; fail loudly rather than pretend to record
-    bail!("relay for \"{server}\" not implemented yet");
+    let code = proxy::run(&server, &cli.command)?;
+    std::process::exit(code);
 }
 
 /// "npx" from "/usr/bin/npx", for a usable default server label.
