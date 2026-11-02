@@ -6,11 +6,12 @@
 use crate::db;
 use crate::jsonrpc::{self, Frame};
 use rusqlite::{Connection, params};
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
     ClientToServer,
     ServerToClient,
@@ -23,6 +24,23 @@ impl Direction {
             Direction::ServerToClient => "s2c",
         }
     }
+
+    /// MCP is two-way: servers can send requests too, and the two sides
+    /// number their tickets independently. A response pairs with the open
+    /// request that traveled the opposite way.
+    fn opposite(self) -> Direction {
+        match self {
+            Direction::ClientToServer => Direction::ServerToClient,
+            Direction::ServerToClient => Direction::ClientToServer,
+        }
+    }
+}
+
+/// An open request waiting for its answer.
+struct OpenRequest {
+    row_id: i64,
+    method: String,
+    ts_ms: i64,
 }
 
 enum Event {
@@ -82,11 +100,21 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
         Ok(id) => id,
         Err(e) => return disabled(rx, &e.to_string()),
     };
+    // open requests waiting for answers, keyed by who asked and the ticket id
+    let mut open: HashMap<(Direction, String), OpenRequest> = HashMap::new();
     loop {
         let Ok(event) = rx.recv() else { return };
         match event {
             Event::Line(dir, bytes) => {
+                let now = now_ms();
                 let frame = jsonrpc::classify(&bytes);
+                // a response is matched to its request before inserting, so
+                // its row carries the method, the request row, and the time
+                // the answer took
+                let answered = match &frame {
+                    Frame::Response { id, .. } => open.remove(&(dir.opposite(), id.clone())),
+                    _ => None,
+                };
                 let (kind, method, rpc_id, error_code, error_msg) = match &frame {
                     Frame::Request { id, method } => (
                         "request",
@@ -98,11 +126,9 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
                     Frame::Notification { method } => {
                         ("notification", Some(method.as_str()), None, None, None)
                     }
-                    // a response does not repeat the method; pairing with its
-                    // request fills that in later
                     Frame::Response { id, error } => (
                         "response",
-                        None,
+                        answered.as_ref().map(|req| req.method.as_str()),
                         Some(id.as_str()),
                         error.as_ref().map(|(code, _)| *code),
                         error.as_ref().map(|(_, msg)| msg.as_str()),
@@ -115,11 +141,11 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
                 let result = conn.execute(
                     "INSERT INTO messages
                      (session_id, ts_ms, direction, kind, method, rpc_id,
-                      error_code, error_msg, body, size_bytes)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                      error_code, error_msg, body, size_bytes, pair_id, latency_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                     params![
                         session,
-                        now_ms(),
+                        now,
                         dir.as_str(),
                         kind,
                         method,
@@ -127,11 +153,23 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
                         error_code,
                         error_msg,
                         body.trim_end(),
-                        bytes.len() as i64
+                        bytes.len() as i64,
+                        answered.as_ref().map(|req| req.row_id),
+                        answered.as_ref().map(|req| now - req.ts_ms),
                     ],
                 );
                 if let Err(e) = result {
                     return disabled(rx, &e.to_string());
+                }
+                if let Frame::Request { id, method } = frame {
+                    open.insert(
+                        (dir, id),
+                        OpenRequest {
+                            row_id: conn.last_insert_rowid(),
+                            method,
+                            ts_ms: now,
+                        },
+                    );
                 }
             }
             Event::Finish(code) => {

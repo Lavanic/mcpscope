@@ -1,0 +1,98 @@
+//! What ends up in the database: pairing, latency, and classification checked
+//! against a scripted server that actually answers.
+#![cfg(unix)]
+
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::thread;
+
+/// Run one proxied session against `server` with its own throwaway data dir,
+/// and hand back the path of the database it recorded into.
+fn run_recorded(name: &str, server: &[&str], input: &[u8]) -> PathBuf {
+    let data = std::env::temp_dir().join(format!("mcpscope-test-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
+        .env("XDG_DATA_HOME", &data)
+        .args(["--name", name, "--"])
+        .args(server)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn mcpscope");
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let input = input.to_vec();
+    let feeder = thread::spawn(move || {
+        let _ = stdin.write_all(&input);
+    });
+    child.wait().expect("session ends");
+    feeder.join().expect("feeder thread");
+    data.join("mcpscope/mcpscope.db")
+}
+
+#[test]
+fn response_is_paired_with_its_request() {
+    // a server that waits a beat, then answers ticket 1
+    let db = run_recorded(
+        "pairing",
+        &[
+            "sh",
+            "-c",
+            r#"read -r _; sleep 0.1; echo '{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'; sleep 0.3"#,
+        ],
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{}}\n",
+    );
+    let conn = rusqlite::Connection::open(db).expect("open test db");
+    let (method, pair_id, latency): (Option<String>, Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT method, pair_id, latency_ms FROM messages WHERE kind = 'response'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("one response row");
+    let request_row: i64 = conn
+        .query_row(
+            "SELECT id FROM messages WHERE kind = 'request'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("one request row");
+
+    assert_eq!(
+        method.as_deref(),
+        Some("tools/call"),
+        "method copied from the request"
+    );
+    assert_eq!(pair_id, Some(request_row), "response points at its request");
+    let latency = latency.expect("latency recorded");
+    assert!(
+        latency >= 50,
+        "latency should reflect the 100ms pause, got {latency}ms"
+    );
+}
+
+#[test]
+fn unmatched_response_stays_orphan() {
+    // answers a ticket nobody opened
+    let db = run_recorded(
+        "orphan",
+        &[
+            "sh",
+            "-c",
+            r#"echo '{"jsonrpc":"2.0","id":99,"result":{}}'; sleep 0.2"#,
+        ],
+        b"",
+    );
+    let conn = rusqlite::Connection::open(db).expect("open test db");
+    let (method, pair_id, latency): (Option<String>, Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT method, pair_id, latency_ms FROM messages WHERE kind = 'response'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("one response row");
+    assert_eq!(method, None);
+    assert_eq!(pair_id, None);
+    assert_eq!(latency, None);
+}
