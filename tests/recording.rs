@@ -120,3 +120,28 @@ fn initialize_handshake_lands_on_the_session() {
     assert_eq!(server_info.as_deref(), Some("fake-server 9.9"));
     assert_eq!(protocol.as_deref(), Some("2025-06-18"));
 }
+
+#[test]
+fn stats_reports_paired_latency() {
+    let db = run_recorded(
+        "stats",
+        &[
+            "sh",
+            "-c",
+            r#"read -r _; sleep 0.1; echo '{"jsonrpc":"2.0","id":1,"result":{}}'; sleep 0.3"#,
+        ],
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{}}\n",
+    );
+    let root = db.parent().unwrap().parent().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
+        .env("XDG_DATA_HOME", root)
+        .arg("stats")
+        .output()
+        .expect("run stats");
+    let text = String::from_utf8(out.stdout).expect("utf8");
+    assert!(
+        text.contains("tools/call"),
+        "stats lists the method:\n{text}"
+    );
+    assert!(text.contains("ms"), "stats shows a latency figure:\n{text}");
+}

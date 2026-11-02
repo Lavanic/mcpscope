@@ -5,6 +5,7 @@ mod db;
 mod jsonrpc;
 mod proxy;
 mod record;
+mod stats;
 mod tail;
 
 use anyhow::{Result, bail};
@@ -39,12 +40,22 @@ enum Cmd {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Per-method call counts, error rates, and latency percentiles
+    Stats {
+        /// Only count traffic for this server
+        #[arg(long)]
+        server: Option<String>,
+        /// Only count traffic newer than this (30m, 24h, 7d)
+        #[arg(long)]
+        since: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Cmd::Tail { server }) => tail::run(server.as_deref()),
+        Some(Cmd::Stats { server, since }) => stats::run(server.as_deref(), since.as_deref()),
         None => {
             if cli.server_cmd.is_empty() {
                 bail!("nothing to do: wrap a server with -- or use a subcommand (see --help)");
