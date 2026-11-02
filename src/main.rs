@@ -5,9 +5,10 @@ mod db;
 mod jsonrpc;
 mod proxy;
 mod record;
+mod tail;
 
-use anyhow::Result;
-use clap::Parser;
+use anyhow::{Result, bail};
+use clap::{Parser, Subcommand};
 
 /// Transparent recording proxy for MCP servers.
 ///
@@ -18,20 +19,41 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Cmd>,
+
     /// Label for this server in recordings (defaults to the command basename)
     #[arg(long)]
     name: Option<String>,
 
     /// The server command to wrap, after --
-    #[arg(last = true, required = true, num_args = 1..)]
-    command: Vec<String>,
+    #[arg(last = true, num_args = 1..)]
+    server_cmd: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Follow recorded traffic live
+    Tail {
+        /// Only show traffic for this server
+        #[arg(long)]
+        server: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let server = cli.name.unwrap_or_else(|| basename(&cli.command[0]));
-    let code = proxy::run(&server, &cli.command)?;
-    std::process::exit(code);
+    match cli.command {
+        Some(Cmd::Tail { server }) => tail::run(server.as_deref()),
+        None => {
+            if cli.server_cmd.is_empty() {
+                bail!("nothing to do: wrap a server with -- or use a subcommand (see --help)");
+            }
+            let server = cli.name.unwrap_or_else(|| basename(&cli.server_cmd[0]));
+            let code = proxy::run(&server, &cli.server_cmd)?;
+            std::process::exit(code);
+        }
+    }
 }
 
 /// "npx" from "/usr/bin/npx", for a usable default server label.
