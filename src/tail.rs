@@ -150,7 +150,7 @@ fn print_row(row: &Row, p: &Palette) {
 
 /// Wall-clock time of day in UTC. Good enough for following along; local
 /// timezones can come with the full viewer.
-fn hms(ts_ms: i64) -> String {
+pub(crate) fn hms(ts_ms: i64) -> String {
     let secs = ts_ms / 1000;
     let (h, m, s) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
     format!("{h:02}:{m:02}:{s:02}")

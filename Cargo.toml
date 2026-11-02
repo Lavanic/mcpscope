@@ -10,5 +10,6 @@ repository = "https://github.com/Lavanic/mcpscope"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "7.0.0"
+ratatui = "0.30.2"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }

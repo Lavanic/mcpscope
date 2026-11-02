@@ -9,6 +9,7 @@ mod record;
 mod redact;
 mod stats;
 mod tail;
+mod view;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
@@ -66,6 +67,8 @@ enum Cmd {
         /// Only wrap these servers (default: all)
         names: Vec<String>,
     },
+    /// Browse recorded sessions in a full-screen viewer
+    View,
     /// Undo install: restore wrapped servers to their original commands
     Uninstall {
         /// Only edit this client's config (claude, cursor)
@@ -81,6 +84,7 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Cmd::Tail { server, errors }) => tail::run(server.as_deref(), errors),
         Some(Cmd::Stats { server, since }) => stats::run(server.as_deref(), since.as_deref()),
+        Some(Cmd::View) => view::run(),
         Some(Cmd::Install { client, names }) => install::install(client.as_deref(), &names),
         Some(Cmd::Uninstall { client, names }) => install::uninstall(client.as_deref(), &names),
         None => {
