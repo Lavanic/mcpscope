@@ -9,12 +9,14 @@ use std::thread;
 
 /// Run one proxied session against `server` with its own throwaway data dir,
 /// and hand back the path of the database it recorded into.
-fn run_recorded(name: &str, server: &[&str], input: &[u8]) -> PathBuf {
+fn run_recorded(name: &str, flags: &[&str], server: &[&str], input: &[u8]) -> PathBuf {
     let data = std::env::temp_dir().join(format!("mcpscope-test-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&data);
     let mut child = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
         .env("XDG_DATA_HOME", &data)
-        .args(["--name", name, "--"])
+        .args(["--name", name])
+        .args(flags)
+        .arg("--")
         .args(server)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -36,6 +38,7 @@ fn response_is_paired_with_its_request() {
     // a server that waits a beat, then answers ticket 1
     let db = run_recorded(
         "pairing",
+        &[],
         &[
             "sh",
             "-c",
@@ -77,6 +80,7 @@ fn unmatched_response_stays_orphan() {
     // answers a ticket nobody opened
     let db = run_recorded(
         "orphan",
+        &[],
         &[
             "sh",
             "-c",
@@ -101,6 +105,7 @@ fn unmatched_response_stays_orphan() {
 fn initialize_handshake_lands_on_the_session() {
     let db = run_recorded(
         "handshake",
+        &[],
         &[
             "sh",
             "-c",
@@ -125,6 +130,7 @@ fn initialize_handshake_lands_on_the_session() {
 fn stats_reports_paired_latency() {
     let db = run_recorded(
         "stats",
+        &[],
         &[
             "sh",
             "-c",
@@ -144,4 +150,28 @@ fn stats_reports_paired_latency() {
         "stats lists the method:\n{text}"
     );
     assert!(text.contains("ms"), "stats shows a latency figure:\n{text}");
+}
+
+#[test]
+fn redact_masks_credentials_in_storage_only() {
+    let db = run_recorded(
+        "redact",
+        &["--redact"],
+        &["sh", "-c", "read -r _; sleep 0.2"],
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"api_key\":\"sk-live-12345\",\"query\":\"weather\"}}\n",
+    );
+    let conn = rusqlite::Connection::open(db).expect("open test db");
+    let body: String = conn
+        .query_row(
+            "SELECT body FROM messages WHERE kind = 'request'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("one request row");
+    assert!(
+        !body.contains("sk-live-12345"),
+        "the secret is gone: {body}"
+    );
+    assert!(body.contains("[redacted]"), "the mask is visible: {body}");
+    assert!(body.contains("weather"), "harmless values survive: {body}");
 }

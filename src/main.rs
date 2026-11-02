@@ -5,6 +5,7 @@ mod db;
 mod jsonrpc;
 mod proxy;
 mod record;
+mod redact;
 mod stats;
 mod tail;
 
@@ -26,6 +27,10 @@ struct Cli {
     /// Label for this server in recordings (defaults to the command basename)
     #[arg(long)]
     name: Option<String>,
+
+    /// Mask credential-shaped fields in stored bodies (the wire is untouched)
+    #[arg(long)]
+    redact: bool,
 
     /// The server command to wrap, after --
     #[arg(last = true, num_args = 1..)]
@@ -64,7 +69,7 @@ fn main() -> Result<()> {
                 bail!("nothing to do: wrap a server with -- or use a subcommand (see --help)");
             }
             let server = cli.name.unwrap_or_else(|| basename(&cli.server_cmd[0]));
-            let code = proxy::run(&server, &cli.server_cmd)?;
+            let code = proxy::run(&server, &cli.server_cmd, cli.redact)?;
             std::process::exit(code);
         }
     }

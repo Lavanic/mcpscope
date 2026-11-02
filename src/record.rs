@@ -5,6 +5,7 @@
 
 use crate::db;
 use crate::jsonrpc::{self, Frame};
+use crate::redact;
 use rusqlite::{Connection, params};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -69,12 +70,12 @@ impl LineSink {
 }
 
 impl Recorder {
-    pub fn start(server: &str, command: &[String]) -> Recorder {
+    pub fn start(server: &str, command: &[String], redact: bool) -> Recorder {
         let (tx, rx) = mpsc::channel();
         let server = server.to_owned();
         // display only; args with spaces are not round-trippable from this
         let command = command.join(" ");
-        let writer = thread::spawn(move || write_loop(&rx, &server, &command));
+        let writer = thread::spawn(move || write_loop(&rx, &server, &command, redact));
         Recorder { tx, writer }
     }
 
@@ -92,11 +93,26 @@ impl Recorder {
     }
 }
 
-fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
-    let conn = match db::default_path().and_then(|path| db::open(&path)) {
+fn write_loop(rx: &Receiver<Event>, server: &str, command: &str, redact: bool) {
+    let path = match db::default_path() {
+        Ok(path) => path,
+        Err(e) => return disabled(rx, &format!("{e:#}")),
+    };
+    let fresh = !path.exists();
+    let conn = match db::open(&path) {
         Ok(conn) => conn,
         Err(e) => return disabled(rx, &format!("{e:#}")),
     };
+    // said once, on the first recording ever: people deserve to know what a
+    // traffic recorder keeps before it has kept anything
+    if fresh {
+        eprintln!("mcpscope: recording to {}", path.display());
+        eprintln!(
+            "mcpscope: note: requests and results are stored in full and can include \
+             secrets or file contents; the file never leaves this machine. \
+             Wrap servers with --redact to mask credential-shaped fields."
+        );
+    }
     let session = match start_session(&conn, server, command) {
         Ok(id) => id,
         Err(e) => return disabled(rx, &e.to_string()),
@@ -137,8 +153,18 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
                     Frame::Noise => ("noise", None, None, None, None),
                 };
                 // stored body drops the line ending; size_bytes keeps the
-                // true wire size
-                let body = String::from_utf8_lossy(&bytes);
+                // true wire size. Redaction rewrites only this stored copy,
+                // long after the original bytes went over the wire.
+                let body = match redact {
+                    true => match serde_json::from_slice::<Value>(&bytes) {
+                        Ok(mut v) => {
+                            redact::scrub(&mut v);
+                            v.to_string().into()
+                        }
+                        Err(_) => String::from_utf8_lossy(&bytes),
+                    },
+                    false => String::from_utf8_lossy(&bytes),
+                };
                 let result = conn.execute(
                     "INSERT INTO messages
                      (session_id, ts_ms, direction, kind, method, rpc_id,
