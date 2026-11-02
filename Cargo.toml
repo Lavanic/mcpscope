@@ -1,0 +1,9 @@
+[package]
+name = "mcpscope"
+version = "0.1.0"
+edition = "2024"
+description = "tcpdump for MCP: record agent/server traffic without changing the conversation"
+license = "MIT"
+repository = "https://github.com/Lavanic/mcpscope"
+
+[dependencies]
