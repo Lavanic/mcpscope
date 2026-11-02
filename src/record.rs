@@ -4,6 +4,7 @@
 //! session carries on unrecorded.
 
 use crate::db;
+use crate::jsonrpc::{self, Frame};
 use rusqlite::{Connection, params};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
@@ -85,16 +86,46 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
         let Ok(event) = rx.recv() else { return };
         match event {
             Event::Line(dir, bytes) => {
+                let frame = jsonrpc::classify(&bytes);
+                let (kind, method, rpc_id, error_code, error_msg) = match &frame {
+                    Frame::Request { id, method } => (
+                        "request",
+                        Some(method.as_str()),
+                        Some(id.as_str()),
+                        None,
+                        None,
+                    ),
+                    Frame::Notification { method } => {
+                        ("notification", Some(method.as_str()), None, None, None)
+                    }
+                    // a response does not repeat the method; pairing with its
+                    // request fills that in later
+                    Frame::Response { id, error } => (
+                        "response",
+                        None,
+                        Some(id.as_str()),
+                        error.as_ref().map(|(code, _)| *code),
+                        error.as_ref().map(|(_, msg)| msg.as_str()),
+                    ),
+                    Frame::Noise => ("noise", None, None, None, None),
+                };
                 // stored body drops the line ending; size_bytes keeps the
                 // true wire size
                 let body = String::from_utf8_lossy(&bytes);
                 let result = conn.execute(
-                    "INSERT INTO messages (session_id, ts_ms, direction, body, size_bytes)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    "INSERT INTO messages
+                     (session_id, ts_ms, direction, kind, method, rpc_id,
+                      error_code, error_msg, body, size_bytes)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         session,
                         now_ms(),
                         dir.as_str(),
+                        kind,
+                        method,
+                        rpc_id,
+                        error_code,
+                        error_msg,
                         body.trim_end(),
                         bytes.len() as i64
                     ],

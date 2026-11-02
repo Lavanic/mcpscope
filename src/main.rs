@@ -2,6 +2,7 @@
 //! MCP server without changing it.
 
 mod db;
+mod jsonrpc;
 mod proxy;
 mod record;
 
