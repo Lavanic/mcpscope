@@ -175,3 +175,24 @@ fn redact_masks_credentials_in_storage_only() {
     assert!(body.contains("[redacted]"), "the mask is visible: {body}");
     assert!(body.contains("weather"), "harmless values survive: {body}");
 }
+
+#[test]
+fn doctor_reports_database_and_configs() {
+    let db = run_recorded(
+        "doctor",
+        &[],
+        &["cat"],
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n",
+    );
+    let root = db.parent().unwrap().parent().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
+        .env("XDG_DATA_HOME", root)
+        .env("HOME", root) // a home with no client configs
+        .arg("doctor")
+        .output()
+        .expect("run doctor");
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).expect("utf8");
+    assert!(text.contains("1 sessions, 2 messages"), "{text}");
+    assert!(text.contains("no config"), "{text}");
+}

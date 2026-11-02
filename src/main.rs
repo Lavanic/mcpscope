@@ -2,6 +2,7 @@
 //! MCP server without changing it.
 
 mod db;
+mod doctor;
 mod install;
 mod jsonrpc;
 mod proxy;
@@ -69,6 +70,8 @@ enum Cmd {
     },
     /// Browse recorded sessions in a full-screen viewer
     View,
+    /// Report where data lives and which client configs are wrapped
+    Doctor,
     /// Undo install: restore wrapped servers to their original commands
     Uninstall {
         /// Only edit this client's config (claude, cursor)
@@ -85,6 +88,7 @@ fn main() -> Result<()> {
         Some(Cmd::Tail { server, errors }) => tail::run(server.as_deref(), errors),
         Some(Cmd::Stats { server, since }) => stats::run(server.as_deref(), since.as_deref()),
         Some(Cmd::View) => view::run(),
+        Some(Cmd::Doctor) => doctor::run(),
         Some(Cmd::Install { client, names }) => install::install(client.as_deref(), &names),
         Some(Cmd::Uninstall { client, names }) => install::uninstall(client.as_deref(), &names),
         None => {

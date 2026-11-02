@@ -13,15 +13,19 @@ struct Client {
     path: PathBuf,
 }
 
-/// Known client config files present on this machine.
-fn known_clients(only: Option<&str>) -> Result<Vec<Client>> {
+/// Every client config location this tool knows about, present or not.
+pub(crate) fn all_clients() -> Result<Vec<(&'static str, PathBuf)>> {
     let home = dirs::home_dir().context("no home directory")?;
-    let all = [
+    Ok(vec![
         ("claude", home.join(".claude.json")),
         ("cursor", home.join(".cursor/mcp.json")),
-    ];
+    ])
+}
+
+/// Known client config files present on this machine.
+fn known_clients(only: Option<&str>) -> Result<Vec<Client>> {
     let mut found = Vec::new();
-    for (name, path) in all {
+    for (name, path) in all_clients()? {
         if only.is_some_and(|o| o != name) {
             continue;
         }
@@ -163,7 +167,7 @@ fn unwrap(_key: &str, entry: &mut Value) -> Outcome {
     Outcome::Changed(format!("restored ({command} ...)"))
 }
 
-fn is_mcpscope(command: &str) -> bool {
+pub(crate) fn is_mcpscope(command: &str) -> bool {
     Path::new(command)
         .file_stem()
         .is_some_and(|stem| stem == "mcpscope")
