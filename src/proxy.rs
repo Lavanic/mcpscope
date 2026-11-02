@@ -3,13 +3,15 @@
 //! The contract: bytes pass through unmodified and promptly, the child's
 //! exit code is propagated, and nothing mcpscope does can break the session.
 
+use crate::record::{Direction, LineSink, Recorder};
 use anyhow::{Context, Result};
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
 
-/// Spawn the server command and relay our stdin/stdout to it untouched.
-/// Blocks until the server exits; returns its exit code.
+/// Spawn the server command and relay our stdin/stdout to it untouched,
+/// recording a copy of the traffic. Blocks until the server exits; returns
+/// its exit code.
 pub fn run(server: &str, command: &[String]) -> Result<i32> {
     let mut child = Command::new(&command[0])
         .args(&command[1..])
@@ -23,12 +25,20 @@ pub fn run(server: &str, command: &[String]) -> Result<i32> {
     let child_in = child.stdin.take().expect("stdin was piped");
     let child_out = child.stdout.take().expect("stdout was piped");
 
+    let recorder = Recorder::start(server, command);
+
     // client -> server. When the client closes our stdin, the pump ends and
     // drops child_in, which closes the server's stdin so it can exit cleanly.
-    let to_server = thread::spawn(move || pump(io::stdin().lock(), child_in));
+    let to_server = {
+        let sink = recorder.sink(Direction::ClientToServer);
+        thread::spawn(move || pump(io::stdin().lock(), child_in, sink))
+    };
 
     // server -> client
-    let to_client = thread::spawn(move || pump(child_out, io::stdout().lock()));
+    let to_client = {
+        let sink = recorder.sink(Direction::ServerToClient);
+        thread::spawn(move || pump(child_out, io::stdout().lock(), sink))
+    };
 
     let status = child.wait().context("waiting on server process")?;
 
@@ -39,20 +49,25 @@ pub fn run(server: &str, command: &[String]) -> Result<i32> {
     drop(to_server);
 
     // no portable exit code when killed by a signal; 1 is the least-wrong answer
-    Ok(status.code().unwrap_or(1))
+    let code = status.code().unwrap_or(1);
+    recorder.finish(code);
+    Ok(code)
 }
 
-/// Copy bytes from one end to the other until EOF, flushing as they arrive.
-/// A write error (e.g. the other side died) just ends the pump: the session
-/// is over and the exit path is handled by wait() above.
-fn pump(mut from: impl Read, mut to: impl Write) -> io::Result<()> {
-    let mut buf = [0u8; 8192];
+/// Relay lines from one end to the other until EOF, flushing as they arrive.
+/// Each line goes to the wire first and the recorder second: the session has
+/// priority over the recording.
+fn pump(from: impl Read, mut to: impl Write, sink: LineSink) -> io::Result<()> {
+    let mut from = BufReader::new(from);
+    let mut line = Vec::new();
     loop {
-        let n = from.read(&mut buf)?;
+        line.clear();
+        let n = from.read_until(b'\n', &mut line)?;
         if n == 0 {
             return Ok(());
         }
-        to.write_all(&buf[..n])?;
+        to.write_all(&line)?;
         to.flush()?;
+        sink.send(&line);
     }
 }

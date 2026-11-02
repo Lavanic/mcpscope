@@ -9,3 +9,5 @@ repository = "https://github.com/Lavanic/mcpscope"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+dirs = "7.0.0"
+rusqlite = { version = "0.41.1", features = ["bundled"] }

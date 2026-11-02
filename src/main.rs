@@ -1,7 +1,9 @@
 //! mcpscope: records the JSON-RPC conversation between an agent and an
 //! MCP server without changing it.
 
+mod db;
 mod proxy;
+mod record;
 
 use anyhow::Result;
 use clap::Parser;
