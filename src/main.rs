@@ -39,6 +39,9 @@ enum Cmd {
         /// Only show traffic for this server
         #[arg(long)]
         server: Option<String>,
+        /// Only show errors and noise
+        #[arg(long)]
+        errors: bool,
     },
     /// Per-method call counts, error rates, and latency percentiles
     Stats {
@@ -54,7 +57,7 @@ enum Cmd {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Some(Cmd::Tail { server }) => tail::run(server.as_deref()),
+        Some(Cmd::Tail { server, errors }) => tail::run(server.as_deref(), errors),
         Some(Cmd::Stats { server, since }) => stats::run(server.as_deref(), since.as_deref()),
         None => {
             if cli.server_cmd.is_empty() {
