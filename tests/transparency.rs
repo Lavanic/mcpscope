@@ -8,12 +8,19 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 /// The real compiled binary, pointed at a throwaway data dir so test runs
-/// never touch the real recording database.
+/// never touch the real recording database. One dir per test: these run in
+/// parallel, and sharing a database makes them fight over schema recreation
+/// (observed as a 59s suite after a version bump). Test threads are named
+/// after their test, which gives us a free unique label.
 fn mcpscope() -> Command {
+    let test = thread::current()
+        .name()
+        .unwrap_or("test")
+        .replace("::", "-");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mcpscope"));
     cmd.env(
         "XDG_DATA_HOME",
-        std::env::temp_dir().join("mcpscope-test-data"),
+        std::env::temp_dir().join(format!("mcpscope-test-{test}-{}", std::process::id())),
     );
     cmd
 }
