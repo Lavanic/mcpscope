@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
 // bump when the schema changes; pre-release we recreate rather than migrate
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA: &str = "
 CREATE TABLE sessions (
@@ -14,7 +14,10 @@ CREATE TABLE sessions (
   command     TEXT NOT NULL,
   started_at  INTEGER NOT NULL,
   ended_at    INTEGER,
-  exit_code   INTEGER
+  exit_code   INTEGER,
+  client      TEXT,
+  server_info TEXT,
+  protocol    TEXT
 );
 CREATE TABLE messages (
   id         INTEGER PRIMARY KEY,

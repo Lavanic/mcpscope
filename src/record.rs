@@ -6,6 +6,7 @@
 use crate::db;
 use crate::jsonrpc::{self, Frame};
 use rusqlite::{Connection, params};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
@@ -161,6 +162,40 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str) {
                 if let Err(e) = result {
                     return disabled(rx, &e.to_string());
                 }
+                // the opening handshake names both parties; copy it onto the
+                // session row so old recordings stay identifiable
+                if let Frame::Request { method, .. } = &frame
+                    && method == "initialize"
+                {
+                    let client = serde_json::from_slice::<Value>(&bytes)
+                        .ok()
+                        .and_then(|v| name_version(v.get("params")?.get("clientInfo")?));
+                    let _ = conn.execute(
+                        "UPDATE sessions SET client = COALESCE(?1, client) WHERE id = ?2",
+                        params![client, session],
+                    );
+                }
+                if answered
+                    .as_ref()
+                    .is_some_and(|req| req.method == "initialize")
+                    && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
+                {
+                    let server_info = v
+                        .get("result")
+                        .and_then(|r| name_version(r.get("serverInfo")?));
+                    // the request proposes a protocol version; the response's
+                    // word is the negotiated one, so that is what we keep
+                    let protocol = v
+                        .get("result")
+                        .and_then(|r| r.get("protocolVersion"))
+                        .and_then(Value::as_str);
+                    let _ = conn.execute(
+                        "UPDATE sessions SET server_info = COALESCE(?1, server_info),
+                                             protocol = COALESCE(?2, protocol)
+                         WHERE id = ?3",
+                        params![server_info, protocol, session],
+                    );
+                }
                 if let Frame::Request { id, method } = frame {
                     open.insert(
                         (dir, id),
@@ -201,6 +236,15 @@ fn disabled(rx: &Receiver<Event>, why: &str) {
             return;
         }
     }
+}
+
+/// "name 1.2.3" out of {"name": ..., "version": ...}, however much is there.
+fn name_version(v: &Value) -> Option<String> {
+    let name = v.get("name")?.as_str()?;
+    Some(match v.get("version").and_then(Value::as_str) {
+        Some(version) => format!("{name} {version}"),
+        None => name.to_owned(),
+    })
 }
 
 fn now_ms() -> i64 {

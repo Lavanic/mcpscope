@@ -96,3 +96,27 @@ fn unmatched_response_stays_orphan() {
     assert_eq!(pair_id, None);
     assert_eq!(latency, None);
 }
+
+#[test]
+fn initialize_handshake_lands_on_the_session() {
+    let db = run_recorded(
+        "handshake",
+        &[
+            "sh",
+            "-c",
+            r#"read -r _; echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"fake-server","version":"9.9"},"capabilities":{}}}'; sleep 0.2"#,
+        ],
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"clientInfo\":{\"name\":\"test-client\",\"version\":\"1.0\"},\"capabilities\":{}}}\n",
+    );
+    let conn = rusqlite::Connection::open(db).expect("open test db");
+    let (client, server_info, protocol): (Option<String>, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT client, server_info, protocol FROM sessions",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("one session row");
+    assert_eq!(client.as_deref(), Some("test-client 1.0"));
+    assert_eq!(server_info.as_deref(), Some("fake-server 9.9"));
+    assert_eq!(protocol.as_deref(), Some("2025-06-18"));
+}
