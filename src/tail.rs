@@ -5,6 +5,7 @@
 //! processes share the file without stepping on each other.
 
 use crate::db;
+use crate::display::{hms, sanitize_line};
 use anyhow::Result;
 use rusqlite::params;
 use std::io::{IsTerminal, stdout};
@@ -123,15 +124,21 @@ fn print_row(row: &Row, p: &Palette) {
         Some(ms) => format!(" {}({ms}ms){}", p.dim, p.reset),
         None => String::new(),
     };
+    // every field below came off the wire, so none of it is printed raw
     let mut rest = match row.kind.as_str() {
-        "request" | "notification" => format!("{}{id}", row.method.as_deref().unwrap_or("")),
+        "request" | "notification" => {
+            format!("{}{id}", sanitize_line(row.method.as_deref().unwrap_or("")))
+        }
         // "?" marks an orphan response whose request we never saw
-        "response" => format!("{}{id}{latency}", row.method.as_deref().unwrap_or("?")),
+        "response" => format!(
+            "{}{id}{latency}",
+            sanitize_line(row.method.as_deref().unwrap_or("?"))
+        ),
         // for noise the body itself is the information
-        _ => truncate(&row.body, 120).to_owned(),
+        _ => sanitize_line(truncate(&row.body, 120)),
     };
     if let Some(msg) = &row.error_msg {
-        rest = format!("{rest} {}{msg}{}", p.red, p.reset);
+        rest = format!("{rest} {}{}{}", p.red, sanitize_line(msg), p.reset);
     }
     println!(
         "{}{}{} {}{:<12}{} {}{arrow}{} {kind_color}{:<12}{} {rest}",
@@ -139,21 +146,13 @@ fn print_row(row: &Row, p: &Palette) {
         hms(row.ts_ms),
         p.reset,
         p.cyan,
-        row.server,
+        sanitize_line(&row.server),
         p.reset,
         p.dim,
         p.reset,
         row.kind,
         p.reset,
     );
-}
-
-/// Wall-clock time of day in UTC. Good enough for following along; local
-/// timezones can come with the full viewer.
-pub(crate) fn hms(ts_ms: i64) -> String {
-    let secs = ts_ms / 1000;
-    let (h, m, s) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
-    format!("{h:02}:{m:02}:{s:02}")
 }
 
 fn truncate(text: &str, max: usize) -> &str {

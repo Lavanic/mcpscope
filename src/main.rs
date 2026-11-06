@@ -2,6 +2,7 @@
 //! MCP server without changing it.
 
 mod db;
+mod display;
 mod doctor;
 mod install;
 mod jsonrpc;

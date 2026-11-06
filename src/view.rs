@@ -3,7 +3,7 @@
 //! workload, this is for digging after the fact.
 
 use crate::db;
-use crate::tail::hms;
+use crate::display::{hms, sanitize_block, sanitize_line};
 use anyhow::Result;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
@@ -218,14 +218,17 @@ fn timeline_item(msg: &Msg) -> ListItem<'_> {
         .latency_ms
         .map(|ms| format!(" ({ms}ms)"))
         .unwrap_or_default();
+    // all of this came off the wire; none of it is rendered raw
     let rest = match msg.kind.as_str() {
-        "request" | "notification" => format!("{}{id}", msg.method.as_deref().unwrap_or("")),
+        "request" | "notification" => {
+            format!("{}{id}", sanitize_line(msg.method.as_deref().unwrap_or("")))
+        }
         "response" => format!(
             "{}{id}{latency} {}",
-            msg.method.as_deref().unwrap_or("?"),
-            msg.error_msg.as_deref().unwrap_or("")
+            sanitize_line(msg.method.as_deref().unwrap_or("?")),
+            sanitize_line(msg.error_msg.as_deref().unwrap_or(""))
         ),
-        _ => msg.body.chars().take(120).collect(),
+        _ => sanitize_line(&msg.body.chars().take(120).collect::<String>()),
     };
     let line = format!("{} {arrow} {:<12} {rest}", hms(msg.ts_ms), msg.kind);
     let style = match msg.kind.as_str() {
@@ -238,10 +241,11 @@ fn timeline_item(msg: &Msg) -> ListItem<'_> {
 }
 
 fn pretty_body(body: &str) -> String {
-    match serde_json::from_str::<serde_json::Value>(body) {
+    let text = match serde_json::from_str::<serde_json::Value>(body) {
         Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_else(|_| body.to_owned()),
         Err(_) => body.to_owned(),
-    }
+    };
+    sanitize_block(&text)
 }
 
 /// Move a selection up or down without running off either end.
