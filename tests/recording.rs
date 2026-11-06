@@ -196,3 +196,51 @@ fn doctor_reports_database_and_configs() {
     assert!(text.contains("1 sessions, 2 messages"), "{text}");
     assert!(text.contains("no config"), "{text}");
 }
+
+// Regression: a reader (tail/stats/view) creates the database file too, so
+// keying the privacy notice on "file did not exist" meant it was silently
+// skipped whenever anything had read first.
+#[test]
+fn retention_notice_survives_a_reader_creating_the_database() {
+    let data = std::env::temp_dir().join(format!("mcpscope-notice-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&data);
+
+    // a reader runs first and creates an empty database
+    Command::new(env!("CARGO_BIN_EXE_mcpscope"))
+        .env("XDG_DATA_HOME", &data)
+        .arg("stats")
+        .output()
+        .expect("run stats");
+    assert!(
+        data.join("mcpscope/mcpscope.db").exists(),
+        "reader made the file"
+    );
+
+    // the first actual recording must still announce what it keeps
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
+        .env("XDG_DATA_HOME", &data)
+        .args(["--name", "notice", "--", "cat"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mcpscope");
+    drop(child.stdin.take());
+    let out = child.wait_with_output().expect("collect");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("stored in full"), "notice shown: {err}");
+
+    // and only once
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
+        .env("XDG_DATA_HOME", &data)
+        .args(["--name", "notice", "--", "cat"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn mcpscope");
+    drop(child.stdin.take());
+    let out = child.wait_with_output().expect("collect");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("stored in full"), "not repeated: {err}");
+}

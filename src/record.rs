@@ -50,6 +50,13 @@ enum Event {
     Finish(i32),
 }
 
+/// What a traffic recorder keeps. Shown by the first recording and by
+/// install, because a proxy's stderr often ends up in a client's log file
+/// rather than in front of a person.
+pub const RETENTION_NOTICE: &str = "note: requests and results are stored in full and can \
+     include secrets or file contents; the database never leaves this machine. \
+     Add --redact to a wrapped server to mask credential-shaped fields.";
+
 /// Owned by the proxy; one writer thread lives behind it.
 pub struct Recorder {
     tx: Sender<Event>,
@@ -98,20 +105,22 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str, redact: bool) {
         Ok(path) => path,
         Err(e) => return disabled(rx, &format!("{e:#}")),
     };
-    let fresh = !path.exists();
     let conn = match db::open(&path) {
         Ok(conn) => conn,
         Err(e) => return disabled(rx, &format!("{e:#}")),
     };
-    // said once, on the first recording ever: people deserve to know what a
-    // traffic recorder keeps before it has kept anything
-    if fresh {
+    // Said once, before the first session is ever stored. Keyed on the
+    // sessions table rather than the file: readers create the file too, and
+    // a notice skipped because `tail` ran first is a notice nobody ever got.
+    let first_ever = conn
+        .query_row("SELECT COUNT(*) FROM sessions", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map(|n| n == 0)
+        .unwrap_or(false);
+    if first_ever {
         eprintln!("mcpscope: recording to {}", path.display());
-        eprintln!(
-            "mcpscope: note: requests and results are stored in full and can include \
-             secrets or file contents; the file never leaves this machine. \
-             Wrap servers with --redact to mask credential-shaped fields."
-        );
+        eprintln!("mcpscope: {RETENTION_NOTICE}");
     }
     let session = match start_session(&conn, server, command) {
         Ok(id) => id,

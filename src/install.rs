@@ -4,6 +4,7 @@
 //! twice. Uninstall restores from the wrapped entry itself, so it works even
 //! if the backup is gone.
 
+use crate::{db, record};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -45,7 +46,12 @@ fn known_clients(only: Option<&str>) -> Result<Vec<Client>> {
 pub fn install(client: Option<&str>, names: &[String]) -> Result<()> {
     let me = std::env::current_exe().context("cannot locate own binary")?;
     let me = me.to_string_lossy().into_owned();
-    edit_clients(client, names, |key, entry| wrap(key, entry, &me))
+    let result = edit_clients(client, names, |key, entry| wrap(key, entry, &me));
+    if result.is_ok() {
+        println!("\n{}", record::RETENTION_NOTICE);
+        println!("recordings live in {}", db::default_path()?.display());
+    }
+    result
 }
 
 pub fn uninstall(client: Option<&str>, names: &[String]) -> Result<()> {
