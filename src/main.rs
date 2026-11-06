@@ -83,7 +83,21 @@ enum Cmd {
     },
 }
 
+/// Rust ignores SIGPIPE, so a closed reader turns every later print into an
+/// error and the default handling is a panic. `mcpscope tail | head` is an
+/// ordinary thing to type, so take the shell's behaviour instead: die
+/// quietly when the reader goes away.
+#[cfg(unix)]
+fn restore_sigpipe() {
+    // safe: setting a signal disposition before any thread exists
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe() {}
+
 fn main() -> Result<()> {
+    restore_sigpipe();
     let cli = Cli::parse();
     match cli.command {
         Some(Cmd::Tail { server, errors }) => tail::run(server.as_deref(), errors),
