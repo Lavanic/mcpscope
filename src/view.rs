@@ -3,7 +3,7 @@
 //! workload, this is for digging after the fact.
 
 use crate::db;
-use crate::display::{hms, sanitize_block, sanitize_line};
+use crate::display::{LOCAL_HMS, LOCAL_STAMP, local_time_sql, sanitize_block, sanitize_line};
 use anyhow::Result;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
@@ -22,7 +22,7 @@ struct Session {
 }
 
 struct Msg {
-    ts_ms: i64,
+    time: String,
     direction: String,
     kind: String,
     method: Option<String>,
@@ -230,7 +230,7 @@ fn timeline_item(msg: &Msg) -> ListItem<'_> {
         ),
         _ => sanitize_line(&msg.body.chars().take(120).collect::<String>()),
     };
-    let line = format!("{} {arrow} {:<12} {rest}", hms(msg.ts_ms), msg.kind);
+    let line = format!("{} {arrow} {:<12} {rest}", msg.time, msg.kind);
     let style = match msg.kind.as_str() {
         "noise" => Style::new().fg(Color::Yellow),
         "request" => Style::new().fg(Color::Green),
@@ -257,12 +257,13 @@ fn step(current: usize, delta: isize, len: usize) -> usize {
 }
 
 fn load_sessions(conn: &Connection) -> Result<Vec<Session>> {
-    let mut stmt = conn.prepare(
-        "SELECT s.id, datetime(s.started_at / 1000, 'unixepoch'), s.server_name,
+    let mut stmt = conn.prepare(&format!(
+        "SELECT s.id, {}, s.server_name,
                 COALESCE(s.client, '?'), COUNT(m.id)
          FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
          GROUP BY s.id ORDER BY s.id DESC",
-    )?;
+        local_time_sql(LOCAL_STAMP, "s.started_at")
+    ))?;
     let rows = stmt.query_map([], |row| {
         Ok(Session {
             id: row.get(0)?,
@@ -276,15 +277,16 @@ fn load_sessions(conn: &Connection) -> Result<Vec<Session>> {
 }
 
 fn load_msgs(conn: &Connection, session: i64, errors_only: bool) -> Result<Vec<Msg>> {
-    let mut stmt = conn.prepare(
-        "SELECT ts_ms, direction, kind, method, rpc_id, body, latency_ms, error_msg
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {}, direction, kind, method, rpc_id, body, latency_ms, error_msg
          FROM messages
          WHERE session_id = ?1 AND (?2 = 0 OR kind = 'noise' OR error_code IS NOT NULL)
          ORDER BY id",
-    )?;
+        local_time_sql(LOCAL_HMS, "ts_ms")
+    ))?;
     let rows = stmt.query_map(params![session, errors_only], |row| {
         Ok(Msg {
-            ts_ms: row.get(0)?,
+            time: row.get(0)?,
             direction: row.get(1)?,
             kind: row.get(2)?,
             method: row.get(3)?,

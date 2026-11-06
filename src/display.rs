@@ -39,11 +39,17 @@ fn sanitize(text: &str, keep_newlines: bool) -> String {
     out
 }
 
-/// Wall-clock time of day, hh:mm:ss.
-pub fn hms(ts_ms: i64) -> String {
-    let secs = ts_ms / 1000;
-    let (h, m, s) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
-    format!("{h:02}:{m:02}:{s:02}")
+/// Local time of day for a recorded millisecond timestamp, as sqlite sees
+/// the machine's timezone. Doing this in the query keeps calendar maths and
+/// a tzdata dependency out of the binary.
+pub const LOCAL_HMS: &str = "strftime('%H:%M:%S', {}/1000.0, 'unixepoch', 'localtime')";
+
+/// Same, with the date, for listings that span days.
+pub const LOCAL_STAMP: &str = "datetime({}/1000.0, 'unixepoch', 'localtime')";
+
+/// Substitute the column into one of the formats above.
+pub fn local_time_sql(format: &str, column: &str) -> String {
+    format.replace("{}", column)
 }
 
 #[cfg(test)]

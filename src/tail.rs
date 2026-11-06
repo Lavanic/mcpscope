@@ -5,7 +5,7 @@
 //! processes share the file without stepping on each other.
 
 use crate::db;
-use crate::display::{hms, sanitize_line};
+use crate::display::{LOCAL_HMS, local_time_sql, sanitize_line};
 use anyhow::Result;
 use rusqlite::params;
 use std::io::{IsTerminal, stdout};
@@ -16,7 +16,7 @@ const POLL: Duration = Duration::from_millis(200);
 
 struct Row {
     id: i64,
-    ts_ms: i64,
+    time: String,
     server: String,
     direction: String,
     kind: String,
@@ -74,20 +74,21 @@ pub fn run(server: Option<&str>, errors_only: bool) -> Result<()> {
     let palette = Palette::new(std::env::var_os("NO_COLOR").is_none() && stdout().is_terminal());
 
     eprintln!("mcpscope: waiting for traffic (ctrl-c to stop)");
-    let mut stmt = conn.prepare(
-        "SELECT m.id, m.ts_ms, s.server_name, m.direction, m.kind, m.method, m.rpc_id,
+    let mut stmt = conn.prepare(&format!(
+        "SELECT m.id, {}, s.server_name, m.direction, m.kind, m.method, m.rpc_id,
                 m.body, m.latency_ms, m.error_msg
          FROM messages m JOIN sessions s ON s.id = m.session_id
          WHERE m.id > ?1
            AND (?2 IS NULL OR s.server_name = ?2)
            AND (?3 = 0 OR m.kind = 'noise' OR m.error_code IS NOT NULL)
          ORDER BY m.id",
-    )?;
+        local_time_sql(LOCAL_HMS, "m.ts_ms")
+    ))?;
     loop {
         let rows = stmt.query_map(params![last_id, server, errors_only], |row| {
             Ok(Row {
                 id: row.get(0)?,
-                ts_ms: row.get(1)?,
+                time: row.get(1)?,
                 server: row.get(2)?,
                 direction: row.get(3)?,
                 kind: row.get(4)?,
@@ -143,7 +144,7 @@ fn print_row(row: &Row, p: &Palette) {
     println!(
         "{}{}{} {}{:<12}{} {}{arrow}{} {kind_color}{:<12}{} {rest}",
         p.dim,
-        hms(row.ts_ms),
+        row.time,
         p.reset,
         p.cyan,
         sanitize_line(&row.server),

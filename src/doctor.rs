@@ -3,6 +3,7 @@
 //! reports.
 
 use crate::db;
+use crate::display::{LOCAL_STAMP, local_time_sql};
 use crate::install;
 use anyhow::Result;
 use serde_json::Value;
@@ -26,9 +27,11 @@ pub fn run() -> Result<()> {
         )?;
         let span: Option<(String, String)> = conn
             .query_row(
-                "SELECT datetime(MIN(started_at) / 1000, 'unixepoch'),
-                        datetime(MAX(started_at) / 1000, 'unixepoch')
-                 FROM sessions",
+                &format!(
+                    "SELECT {}, {} FROM sessions",
+                    local_time_sql(LOCAL_STAMP, "MIN(started_at)"),
+                    local_time_sql(LOCAL_STAMP, "MAX(started_at)")
+                ),
                 [],
                 |row| {
                     Ok((
@@ -41,7 +44,7 @@ pub fn run() -> Result<()> {
         println!("database: {} ({})", path.display(), human_bytes(size));
         match span {
             Some((oldest, newest)) => {
-                println!("  {sessions} sessions, {messages} messages, {oldest} to {newest} UTC");
+                println!("  {sessions} sessions, {messages} messages, {oldest} to {newest}");
             }
             None => println!("  empty"),
         }
