@@ -109,3 +109,17 @@ fn unknown_client_is_an_error() {
         .expect("run mcpscope");
     assert!(!out.status.success());
 }
+
+#[test]
+fn doctor_flags_a_wrapped_entry_whose_binary_is_gone() {
+    let (home, cfg) = fake_home("stale");
+    // wrap, then rewrite the command to a path that does not exist, as if
+    // the repo had moved or the binary been uninstalled
+    run(&home, &["install", "--client", "claude"]);
+    let mut v = read(&cfg);
+    v["mcpServers"]["alpha"]["command"] = json!("/nowhere/at/all/mcpscope");
+    std::fs::write(&cfg, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    let out = run(&home, &["doctor"]);
+    assert!(out.contains("MISSING"), "doctor names the brick: {out}");
+}

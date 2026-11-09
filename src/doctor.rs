@@ -71,6 +71,17 @@ pub fn run() -> Result<()> {
             Some(servers) if !servers.is_empty() => {
                 for (key, entry) in servers {
                     let state = match entry.get("command").and_then(Value::as_str) {
+                        // a wrapped entry pointing at a binary that moved or
+                        // was deleted breaks every session silently; this is
+                        // the one place that failure gets a name
+                        Some(cmd)
+                            if install::is_mcpscope(cmd)
+                                && std::path::Path::new(cmd).is_absolute()
+                                && !std::path::Path::new(cmd).exists() =>
+                        {
+                            "wrapped, but the mcpscope binary is MISSING: \
+                             servers will fail to start; run install again or uninstall"
+                        }
                         Some(cmd) if install::is_mcpscope(cmd) => "wrapped",
                         Some(_) => "not wrapped",
                         None => "remote or unusual",
