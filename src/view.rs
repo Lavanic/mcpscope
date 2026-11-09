@@ -30,6 +30,7 @@ struct Msg {
     body: String,
     latency_ms: Option<i64>,
     error_msg: Option<String>,
+    truncated: bool,
 }
 
 enum Screen {
@@ -194,7 +195,10 @@ impl App {
                     msg.kind,
                     msg.method.as_deref().unwrap_or("")
                 );
-                let text = pretty_body(&msg.body);
+                let mut text = pretty_body(&msg.body);
+                if msg.truncated {
+                    text.push_str("\n\n[stored body truncated by --max-body]");
+                }
                 let para = Paragraph::new(text)
                     .block(Block::bordered().title(title))
                     .scroll((self.scroll, 0));
@@ -278,7 +282,7 @@ fn load_sessions(conn: &Connection) -> Result<Vec<Session>> {
 
 fn load_msgs(conn: &Connection, session: i64, errors_only: bool) -> Result<Vec<Msg>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {}, direction, kind, method, rpc_id, body, latency_ms, error_msg
+        "SELECT {}, direction, kind, method, rpc_id, body, latency_ms, error_msg, truncated
          FROM messages
          WHERE session_id = ?1 AND (?2 = 0 OR kind = 'noise' OR error_code IS NOT NULL)
          ORDER BY id",
@@ -294,6 +298,7 @@ fn load_msgs(conn: &Connection, session: i64, errors_only: bool) -> Result<Vec<M
             body: row.get(5)?,
             latency_ms: row.get(6)?,
             error_msg: row.get(7)?,
+            truncated: row.get(8)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)

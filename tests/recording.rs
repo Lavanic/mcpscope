@@ -244,3 +244,30 @@ fn retention_notice_survives_a_reader_creating_the_database() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!err.contains("stored in full"), "not repeated: {err}");
 }
+
+#[test]
+fn max_body_caps_storage_but_never_the_wire() {
+    // a 5KB request through a 1k cap: the echo (covered by the transparency
+    // suite) is untouched; the stored copy is capped and marked
+    let big = "x".repeat(5000);
+    let input = format!(
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{{\"blob\":\"{big}\"}}}}\n"
+    );
+    let db = run_recorded(
+        "maxbody",
+        &["--max-body", "1k"],
+        &["sh", "-c", "read -r _; sleep 0.1"],
+        input.as_bytes(),
+    );
+    let conn = rusqlite::Connection::open(db).expect("open test db");
+    let (len, size, truncated): (i64, i64, bool) = conn
+        .query_row(
+            "SELECT LENGTH(body), size_bytes, truncated FROM messages WHERE kind = 'request'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("one request row");
+    assert!(len <= 1024, "stored body is capped: {len}");
+    assert!(size > 5000, "size_bytes keeps the true wire size: {size}");
+    assert!(truncated, "the cap leaves a mark");
+}

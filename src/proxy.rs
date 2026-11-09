@@ -12,7 +12,7 @@ use std::thread;
 /// Spawn the server command and relay our stdin/stdout to it untouched,
 /// recording a copy of the traffic. Blocks until the server exits; returns
 /// its exit code.
-pub fn run(server: &str, command: &[String], redact: bool) -> Result<i32> {
+pub fn run(server: &str, command: &[String], redact: bool, max_body: usize) -> Result<i32> {
     let mut child = Command::new(&command[0])
         .args(&command[1..])
         .stdin(Stdio::piped())
@@ -25,7 +25,7 @@ pub fn run(server: &str, command: &[String], redact: bool) -> Result<i32> {
     let child_in = child.stdin.take().expect("stdin was piped");
     let child_out = child.stdout.take().expect("stdout was piped");
 
-    let recorder = Recorder::start(server, command, redact);
+    let recorder = Recorder::start(server, command, redact, max_body);
 
     // client -> server. When the client closes our stdin, the pump ends and
     // drops child_in, which closes the server's stdin so it can exit cleanly.

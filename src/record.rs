@@ -77,12 +77,12 @@ impl LineSink {
 }
 
 impl Recorder {
-    pub fn start(server: &str, command: &[String], redact: bool) -> Recorder {
+    pub fn start(server: &str, command: &[String], redact: bool, max_body: usize) -> Recorder {
         let (tx, rx) = mpsc::channel();
         let server = server.to_owned();
         // display only; args with spaces are not round-trippable from this
         let command = command.join(" ");
-        let writer = thread::spawn(move || write_loop(&rx, &server, &command, redact));
+        let writer = thread::spawn(move || write_loop(&rx, &server, &command, redact, max_body));
         Recorder { tx, writer }
     }
 
@@ -100,7 +100,7 @@ impl Recorder {
     }
 }
 
-fn write_loop(rx: &Receiver<Event>, server: &str, command: &str, redact: bool) {
+fn write_loop(rx: &Receiver<Event>, server: &str, command: &str, redact: bool, max_body: usize) {
     let path = match db::default_path() {
         Ok(path) => path,
         Err(e) => return disabled(rx, &format!("{e:#}")),
@@ -174,11 +174,17 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str, redact: bool) {
                     },
                     false => String::from_utf8_lossy(&bytes),
                 };
+                // the cap also applies to storage only: a 100MB tool result
+                // reaches the client whole and the cabinet keeps the head
+                let stored = body.trim_end();
+                let truncated = stored.len() > max_body;
+                let stored = clamp_utf8(stored, max_body);
                 let result = conn.execute(
                     "INSERT INTO messages
                      (session_id, ts_ms, direction, kind, method, rpc_id,
-                      error_code, error_msg, body, size_bytes, pair_id, latency_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                      error_code, error_msg, body, size_bytes, truncated,
+                      pair_id, latency_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                     params![
                         session,
                         now,
@@ -188,8 +194,9 @@ fn write_loop(rx: &Receiver<Event>, server: &str, command: &str, redact: bool) {
                         rpc_id,
                         error_code,
                         error_msg,
-                        body.trim_end(),
+                        stored,
                         bytes.len() as i64,
+                        truncated,
                         answered.as_ref().map(|req| req.row_id),
                         answered.as_ref().map(|req| now - req.ts_ms),
                     ],
@@ -271,6 +278,19 @@ fn disabled(rx: &Receiver<Event>, why: &str) {
             return;
         }
     }
+}
+
+/// The longest prefix within max bytes that is still whole utf-8; cutting a
+/// multi-byte character in half would make the stored text invalid.
+fn clamp_utf8(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut cut = max;
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    &s[..cut]
 }
 
 /// "name 1.2.3" out of {"name": ..., "version": ...}, however much is there.

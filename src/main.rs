@@ -36,6 +36,11 @@ struct Cli {
     #[arg(long)]
     redact: bool,
 
+    /// Most bytes of one message body to store; the wire always carries the
+    /// full message (forms like 4096, 256k, 1m)
+    #[arg(long, default_value = "256k", value_parser = parse_size)]
+    max_body: usize,
+
     /// The server command to wrap, after --
     #[arg(last = true, num_args = 1..)]
     server_cmd: Vec<String>,
@@ -111,10 +116,24 @@ fn main() -> Result<()> {
                 bail!("nothing to do: wrap a server with -- or use a subcommand (see --help)");
             }
             let server = cli.name.unwrap_or_else(|| basename(&cli.server_cmd[0]));
-            let code = proxy::run(&server, &cli.server_cmd, cli.redact)?;
+            let code = proxy::run(&server, &cli.server_cmd, cli.redact, cli.max_body)?;
             std::process::exit(code);
         }
     }
+}
+
+/// "256k" to bytes, for the --max-body flag.
+fn parse_size(text: &str) -> Result<usize, String> {
+    let text = text.trim();
+    let (number, unit) = match text.as_bytes().last() {
+        Some(b'k') | Some(b'K') => (&text[..text.len() - 1], 1024),
+        Some(b'm') | Some(b'M') => (&text[..text.len() - 1], 1024 * 1024),
+        _ => (text, 1),
+    };
+    number
+        .parse::<usize>()
+        .map(|n| n * unit)
+        .map_err(|_| format!("bad size \"{text}\": use forms like 4096, 256k, 1m"))
 }
 
 /// "npx" from "/usr/bin/npx", for a usable default server label.
@@ -123,4 +142,18 @@ fn basename(cmd: &str) -> String {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| cmd.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_size;
+
+    #[test]
+    fn sizes_parse() {
+        assert_eq!(parse_size("4096").unwrap(), 4096);
+        assert_eq!(parse_size("256k").unwrap(), 262144);
+        assert_eq!(parse_size("1M").unwrap(), 1048576);
+        assert!(parse_size("k").is_err());
+        assert!(parse_size("1.5m").is_err());
+    }
 }
