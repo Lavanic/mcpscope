@@ -19,7 +19,7 @@ fn mcpscope() -> Command {
         .replace("::", "-");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_mcpscope"));
     cmd.env(
-        "XDG_DATA_HOME",
+        "MCPSCOPE_DATA_DIR",
         std::env::temp_dir().join(format!("mcpscope-test-{test}-{}", std::process::id())),
     );
     cmd

@@ -13,7 +13,7 @@ fn run_recorded(name: &str, flags: &[&str], server: &[&str], input: &[u8]) -> Pa
     let data = std::env::temp_dir().join(format!("mcpscope-test-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&data);
     let mut child = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
-        .env("XDG_DATA_HOME", &data)
+        .env("MCPSCOPE_DATA_DIR", &data)
         .args(["--name", name])
         .args(flags)
         .arg("--")
@@ -30,7 +30,7 @@ fn run_recorded(name: &str, flags: &[&str], server: &[&str], input: &[u8]) -> Pa
     });
     child.wait().expect("session ends");
     feeder.join().expect("feeder thread");
-    data.join("mcpscope/mcpscope.db")
+    data.join("mcpscope.db")
 }
 
 #[test]
@@ -138,9 +138,9 @@ fn stats_reports_paired_latency() {
         ],
         b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{}}\n",
     );
-    let root = db.parent().unwrap().parent().unwrap();
+    let root = db.parent().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
-        .env("XDG_DATA_HOME", root)
+        .env("MCPSCOPE_DATA_DIR", root)
         .arg("stats")
         .output()
         .expect("run stats");
@@ -184,9 +184,9 @@ fn doctor_reports_database_and_configs() {
         &["cat"],
         b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n",
     );
-    let root = db.parent().unwrap().parent().unwrap();
+    let root = db.parent().unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
-        .env("XDG_DATA_HOME", root)
+        .env("MCPSCOPE_DATA_DIR", root)
         .env("HOME", root) // a home with no client configs
         .arg("doctor")
         .output()
@@ -207,18 +207,15 @@ fn retention_notice_survives_a_reader_creating_the_database() {
 
     // a reader runs first and creates an empty database
     Command::new(env!("CARGO_BIN_EXE_mcpscope"))
-        .env("XDG_DATA_HOME", &data)
+        .env("MCPSCOPE_DATA_DIR", &data)
         .arg("stats")
         .output()
         .expect("run stats");
-    assert!(
-        data.join("mcpscope/mcpscope.db").exists(),
-        "reader made the file"
-    );
+    assert!(data.join("mcpscope.db").exists(), "reader made the file");
 
     // the first actual recording must still announce what it keeps
     let mut child = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
-        .env("XDG_DATA_HOME", &data)
+        .env("MCPSCOPE_DATA_DIR", &data)
         .args(["--name", "notice", "--", "cat"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -232,7 +229,7 @@ fn retention_notice_survives_a_reader_creating_the_database() {
 
     // and only once
     let mut child = Command::new(env!("CARGO_BIN_EXE_mcpscope"))
-        .env("XDG_DATA_HOME", &data)
+        .env("MCPSCOPE_DATA_DIR", &data)
         .args(["--name", "notice", "--", "cat"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

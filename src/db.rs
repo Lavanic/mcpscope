@@ -38,11 +38,17 @@ CREATE TABLE messages (
 CREATE INDEX idx_messages_session_ts ON messages(session_id, ts_ms);
 ";
 
-/// Default database location, e.g. ~/.local/share/mcpscope/mcpscope.db
+/// Default database location, e.g. ~/.local/share/mcpscope/mcpscope.db.
+/// MCPSCOPE_DATA_DIR overrides the folder outright: it works the same on
+/// every platform (XDG variables mean nothing on mac), which is what the
+/// test suite isolates with, and it lets anyone relocate their recordings.
 pub fn default_path() -> Result<PathBuf> {
-    let dir = dirs::data_dir()
-        .context("no data directory for this platform")?
-        .join("mcpscope");
+    let dir = match std::env::var_os("MCPSCOPE_DATA_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => dirs::data_dir()
+            .context("no data directory for this platform")?
+            .join("mcpscope"),
+    };
     std::fs::create_dir_all(&dir).with_context(|| format!("could not create {}", dir.display()))?;
     Ok(dir.join("mcpscope.db"))
 }
